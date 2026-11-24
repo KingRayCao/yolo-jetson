@@ -1,31 +1,21 @@
-# YOLOv5s on Jetson Nano
+# YOLOv5 TensorRT inference
 
-本项目在 Windows 导出 YOLOv5s v7.0 FP32 ONNX，在 Jetson Nano 上构建 TensorRT 8.2.1 引擎并验证单图结果。部署输入固定为 1×3×640×640，ONNX opset 为 12。
+在装有 CUDA、TensorRT Python 绑定、OpenCV 和 NumPy 的 Linux 设备上直接运行。输入模型为 batch 1 的静态 YOLOv5 检测 ONNX，引擎输出是 NMS 前的检测张量。输入分辨率取自引擎。
 
-## Windows 准备与复现
+## 构建 FP32 引擎
 
-需要 PowerShell 7.4 或更新版本、Git、OpenSSH、tar 和 uv。将 COCO2017 的三个原始 ZIP 放到项目的 COCO2017 目录，也可以使用该目录中已经解压的数据。Git 与 Python 下载使用当前进程配置的网络代理。
-
-```powershell
-pwsh -File scripts/prepare_local.ps1
+```bash
+bash scripts/benchmark_fp32.sh model.onnx model.engine
 ```
 
-脚本按 uv.lock 同步环境，下载缺少的权重，准备 COCO2017 并拉取 YOLOv5 v7.0 源码，再导出和简化 ONNX。runs/yolov5s_baseline/baseline.json 记录本机 PyTorch 和 ONNX Runtime 的结果。
+脚本从 PATH 查找 trtexec，可通过 `TRTEXEC` 指定程序路径。额外参数会传给 trtexec，JetPack 4.6 上可加 `--workspace=512`。已有本机可用的引擎时，可以直接运行推理。
 
-## 同步与板端基线
+## 推理并生成 COCO JSON
 
-准备可用的 SSH 主机别名 jetson。板端项目目录为 /home/nvidia/yolo-jetson。
-
-```powershell
-git push origin main
-pwsh -File scripts/jetson.ps1 -Action sync
-pwsh -File scripts/jetson.ps1 -Action check
-pwsh -File scripts/jetson.ps1 -Action benchmark
-pwsh -File scripts/jetson.ps1 -Action collect
+```bash
+python3 scripts/detect.py model.engine images/ --output detections.json
 ```
 
-- sync 用 Git bundle 将已提交的 main 同步到 Jetson，板端保持与 origin/main 的跟踪关系。它还会传输模型、参考结果和缺少的 COCO val2017 数据。仅同步代码时加 -CodeOnly。
-- benchmark 在 Jetson 本地构建 FP32 引擎，用 COCO 图像 000000000139.jpg 的输入张量预热 500 ms，并测量 200 次推理。给 benchmark 与 collect 都加 -ReuseEngine 可复测已构建的同一模型。
-- collect 拉取 trtexec 日志，在 Windows 用同一套 YOLOv5 后处理核对输出，并生成经 COCO API 验证的样例 sample_coco.json。日志和样例位于 runs/yolov5s_baseline/jetson_fp32。
+图片参数接受单张文件或目录。数字文件名用作图像 ID，其他文件按顺序编号。传入 `--annotations` 可沿用 COCO 标注中的原始 ID。80 类模型默认采用 COCO 类别映射，其他模型可以按模型类别顺序传入 `--category-ids`。
 
-trtexec 的计时覆盖引擎计算与张量传输。课程所需的端到端 FPS 和全量检测精度由完整测试集评估获得。Git 管理脚本、环境定义和锁文件。数据集、权重、上游源码副本和基线产物保存在本地或板端工作目录。
+输出使用 COCO 的原图像素坐标 `[x, y, width, height]`。用 `--conf` 和 `--iou` 调整默认的 0.25 置信度阈值及 0.45 NMS IoU 阈值。程序统计从已解码图片到检测结果的平均耗时和 FPS。系统找不到 CUDA 运行库时，可设置 `CUDART_LIBRARY` 指向实际库文件。
