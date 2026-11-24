@@ -1,0 +1,12 @@
+/.venv/
+/.uv-cache/
+/.uv-python/
+__pycache__/
+*.py[cod]
+
+/COCO2017/
+/weights/
+/runs/
+*.pt
+*.onnx
+*.engine
